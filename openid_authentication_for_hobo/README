@@ -1,0 +1,203 @@
+OpenID Authentication for Hobo (VERSION 2)
+==========================================
+
+NEW in version 2: Totally rewritten to work with v2.x of ruby-openid
+gem, and with Hobo's new user models and controllers.
+
+This plugin provides a drop-in replacement authentication system for
+Hobo (http://hobocentral.net/). Instead of using password based
+authentication, it uses a decentralized sign-in system called OpenID
+(http://openid.net/).
+
+An important difference between this function and Hobo's built in user
+management is that this plugin does not provide a signup url. Instead,
+users are allowed to log in without signing up first. When a user logs
+in for the first time a new user account will automatically be
+created. You can optionally use simple registration to have that new
+account filled with information about the new user, also
+automatically.
+
+If you want to allow multiple OpenID URLs to be associated with a
+single user, all you need to do is override the method
+find_by_identity_url in your user model. You will need to set it up so
+that it returns a given user record when passed any of that user's
+OpenID URLs.
+
+
+Installing
+===========
+
+- Install Hobo plugin
+- Install the ruby-openid and ruby-yadis gems.
+- Unpack the plugin in your vendor/plugins directory.
+
+
+Setting up
+==========
+
+This plugin works basically the same way authenticated user support
+works in Hobo. There are just a couple of extra things you will need
+to set up. Here is the process in its entirety:
+
+
+Create a user model
+-------------------
+
+The default hobo command now creates the User model - change User 
+as appropriate if you call it something else.
+
+Open app/models/user.rb to remove this line:
+
+    hobo_user_model
+
+and replace it with these:
+
+    hobo_openid_user_model
+
+    fields do 
+      openid :string, :login => true
+      administrator :boolean, :default => false
+      remember_token :string
+      remember_token_expires_at :datetime
+      timestamps
+    end
+
+NOTES:
+- the administrator column can be omitted, if you also leave out
+set_admin_on_first_user
+- the remember_token fields are optional
+
+The attribute identified for login will be used to store the openid.
+
+OpenID can also provide selected information about a user (full name,
+nickname, etc.). You'll probably want to use some of this to make
+the display a little nicer. At the very least, you will probably want
+the nickname field. If you add it, add the following to user.rb:
+
+    def name; nickname; end
+
+Hobo will look for an attribute "name" for display purposes in most
+of the Rapid library.
+
+
+Create a users controller
+-------------------------
+
+Create a controller - either manually or using a generation
+script. Put this line in it:
+
+    hobo_openid_user_controller
+
+The controller does not need to contain anything other than that
+single line. Basic actions will be defined automatically.
+
+If the controller contains this line, make sure to remove it:
+
+   hobo_user_controller
+
+
+Add filters to application.rb
+-----------------------------
+
+NOTE: not extensively tested - somebody want to check this?
+
+Add this line to app/controllers/application.rb:
+
+    before_filter :login_required
+
+If you added the remember_token fields, add this line above the previous one:
+
+    before_filter :login_from_cookie
+
+
+Create routes
+-------------
+
+Add this line to config/routes.rb:
+
+    Hobo.add_openid_routes(map)
+
+
+Create a login page
+-------------------
+
+Now done automatically! Could probably use more info on OpenID.
+"Remember me" box will appear if the model defines the relevant fields.
+
+
+Simple Registration
+===================
+
+Simple registration is a part of the OpenID protocol that is intended
+to make signing up with a web application really fast. Using this
+plugin, when a user signs in for the first time a new account is
+automatically created. If you define simple registration mappings in
+your user model, the plugin will ask the user's OpenID provider for
+the simple registration parameters specified. The responses will be
+entered into the new user record in the database columns you specify
+in the mappings.
+
+To define some simple registration mappings, add a line like this to
+your user model:
+
+    set_simple_registration_mappings :optional => { :email => :email,
+                                                    :fullname => :full_name,
+                                                    :timezone => :time_zone }
+
+These mappings will cause the plugin to ask for the user's email
+address, full name, and time zone. When the user logs into your
+application for the first time, she will see a screen on her OpenID
+providers web site asking her if she wants to log into your
+application. She will also be told what information your application is
+asking for, and she will be given an opportunity to enter that
+information.
+
+If your user does enter the requested information, it will be recorded
+in the database in her user record. Using the above mappings, here
+email address will be stored in the email column, her name will be
+stored in the full_name column, and her time zone will be stored in
+the time_zone column.
+
+You can specify that certain information is required, instead of
+optional, with another line like this:
+
+    set_simple_registration_mappings :required => { ... }
+    set_simple_registration_mappings :optional => { ... }
+
+Note that specifying that information is required does not guarantee
+that your application will get it. It is a way for you to inform the
+user that if that information is not provided, she won't be allowed to
+sign up. You will have to define validations for required information
+yourself though.
+
+Here are all of the simple registration parameters that you can use:
+
+    email, nickname, fullname, dob, gender, postcode, country,
+    timezone, language
+
+
+Policy URL
+==========
+
+If you decide to use simple registration, it might also be a good idea
+to provide a policy URL. This is a URL to a page that describes your
+policy about handling users' data. Most users will feel more
+comfortable using your application if they are assured that their
+information will be kept private.
+
+If you specify a privacy URL, then when the user is asked for simple
+registration information she will also be shown a link to your
+policy. If you do not provide a policy URL, some providers will show a
+message to the user warning that you did not provide a privacy policy.
+
+There are two ways to provide a policy URL to your users. The first is
+to create a named route called "policy", by adding a line like this to
+config/routes.rb:
+
+    map.policy 'privacy_policy', :controller => 'front', :action => 'policy'
+
+The other method is to override the login action in your user
+controller. In the new version of login you should call hobo_login and
+pass something like :policy_url => url_for(:action => 'policy') as an
+argument. This method will take precedence over the named route, if
+you use both methods.
